@@ -71,13 +71,16 @@
 
   /* ---------- 命盤 ---------- */
   #chartWrap{max-width:840px;margin:0 auto;display:none;}
+  #gridScale{overflow:hidden;}
   .grid{
     display:grid;
+    width:840px;
     grid-template-columns:repeat(4,1fr);
     grid-template-rows:repeat(4,1fr);
     border:2px solid var(--line);
     background:var(--line);
     gap:1px;
+    transform-origin:0 0;
   }
   .cell{
     background:var(--paper);
@@ -179,9 +182,7 @@
   #backBtn{display:block;margin:16px auto 0;padding:8px 20px;background:#555;color:#fff;border:none;cursor:pointer;}
 
   @media (max-width:720px){
-    .grid{grid-template-columns:repeat(2,1fr);grid-template-rows:auto;}
-    .center{grid-column:1 / span 2;grid-row:auto;order:-1;}
-    .cell{height:auto;min-height:120px;}
+    .monthGrid{grid-template-columns:repeat(2,1fr);}
   }
 </style>
 </head>
@@ -236,7 +237,7 @@
 </div>
 
 <div id="chartWrap">
-  <div class="grid" id="grid"></div>
+  <div id="gridScale"><div class="grid" id="grid"></div></div>
   <div id="specialPatterns"></div>
 
   <div id="yearFlowWrap">
@@ -435,6 +436,18 @@ function starLineHtml(star, cls){
   return html;
 }
 
+/* ---------------- 整盤等比縮放（手機/窄視窗時將840px命盤縮小塞進螢幕） ---------------- */
+function scaleChart(){
+  const wrap = document.getElementById('gridScale');
+  const grid = document.getElementById('grid');
+  if(!wrap || !grid || !grid.children.length) return;
+  const avail = wrap.clientWidth;
+  const scale = Math.min(1, avail / 840);
+  grid.style.transform = scale < 1 ? `scale(${scale})` : 'none';
+  wrap.style.height = (grid.offsetHeight * scale) + 'px';
+}
+window.addEventListener('resize', scaleChart);
+
 /* ---------------- 自動縮放：先算出每格所需字體，取最小值統一套用全盤 ---------------- */
 function computeFitFontSize(cellEl){
   const content = cellEl.querySelector('.cellContent');
@@ -575,6 +588,8 @@ function renderChart(astrolabe, gender){
   if(yfResultBox) yfResultBox.innerHTML = '';
   const yfInput = document.getElementById('yfYearInput');
   if(yfInput) yfInput.value = new Date().getFullYear();
+
+  scaleChart();
 }
 
 /* ================= 特殊命格判斷 ================= */
