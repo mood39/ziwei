@@ -69,6 +69,32 @@
   #leapRow{display:none;}
   .errBox{color:var(--red);text-align:center;padding:10px;font-size:13px;display:none;}
 
+  /* ---------- 常用命盤 ---------- */
+  #profileSection{border-bottom:2px solid var(--line);}
+  .profileHeader{
+    background:#666;color:#fff;text-align:center;padding:6px;font-size:14px;letter-spacing:2px;
+  }
+  #profileList{max-height:220px;overflow-y:auto;}
+  .profileItem{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:8px 12px;border-bottom:1px solid #eee;font-size:14px;gap:8px;
+  }
+  .profileItem .pInfo{flex:1;min-width:0;}
+  .profileItem .pName{font-weight:bold;color:var(--red-dark);}
+  .profileItem .pBirth{color:#777;font-size:12.5px;}
+  .profileItem button{
+    padding:4px 10px;font-size:13px;border:1px solid #bbb;background:#fff;cursor:pointer;
+    border-radius:3px;white-space:nowrap;
+  }
+  .profileItem button.pChart{background:var(--red);color:#fff;border-color:var(--red);}
+  .profileItem button:hover{opacity:0.85;}
+  .profileEmpty{padding:10px;text-align:center;color:#999;font-size:13px;}
+  #saveBtn{
+    display:block;width:100%;padding:8px;background:#3a7d44;color:#fff;
+    border:none;font-size:14px;letter-spacing:2px;cursor:pointer;border-top:1px solid #fff;
+  }
+  #saveBtn:hover{background:#2e6336;}
+
   /* ---------- 命盤 ---------- */
   #chartWrap{max-width:840px;margin:0 auto;display:none;}
   #gridScale{overflow:hidden;}
@@ -192,7 +218,18 @@
 
 <div id="formWrap">
   <div class="formHeader">紫微斗數算命</div>
+
+  <div id="profileSection">
+    <div class="profileHeader">常用命盤</div>
+    <div id="profileList"></div>
+  </div>
+
   <div class="formSub">請輸入您的生日</div>
+
+  <div class="row">
+    <label class="rowLabel">姓名</label>
+    <input type="text" id="nameInput" placeholder="儲存命盤時使用（選填）" style="flex:1;padding:4px 6px;font-size:14px;border:1px solid #bbb;">
+  </div>
 
   <div class="row">
     <label class="rowLabel">性別</label>
@@ -234,6 +271,7 @@
 
   <div class="errBox" id="errBox"></div>
   <button id="submitBtn">開 始 排 盤</button>
+  <button id="saveBtn">儲 存 到 常 用 命 盤</button>
 </div>
 
 <div id="chartWrap">
@@ -353,41 +391,163 @@ calType.addEventListener('change', ()=>{
 });
 
 /* ---------------- 送出排盤 ---------------- */
-document.getElementById('submitBtn').addEventListener('click', () => {
+/* ---------------- 讀取/寫入表單 ---------------- */
+function readForm(){
+  return {
+    name: document.getElementById('nameInput').value.trim(),
+    gender: document.querySelector('input[name=gender]:checked').value,
+    calType: calType.value,
+    year: parseInt(document.getElementById('yearInput').value,10),
+    month: parseInt(monthSel.value,10),
+    day: parseInt(daySel.value,10),
+    leap: document.getElementById('leapInput').checked,
+    hourIndex: parseInt(hourSel.value,10)
+  };
+}
+function writeForm(d){
+  document.getElementById('nameInput').value = d.name || '';
+  document.querySelectorAll('input[name=gender]').forEach(r=>{ r.checked = (r.value===d.gender); });
+  calType.value = d.calType;
+  calType.dispatchEvent(new Event('change'));
+  document.getElementById('yearInput').value = d.year;
+  monthSel.value = d.month;
+  daySel.value = d.day;
+  document.getElementById('leapInput').checked = !!d.leap;
+  hourSel.value = d.hourIndex;
+}
+
+/* ---------------- 排盤主流程 ---------------- */
+function chartFromData(d){
   const errBox = document.getElementById('errBox');
   errBox.style.display='none';
   try{
-    const gender = document.querySelector('input[name=gender]:checked').value;
-    const year = parseInt(document.getElementById('yearInput').value,10);
-    const month = parseInt(monthSel.value,10);
-    const day = parseInt(daySel.value,10);
-    const hourIndex = parseInt(hourSel.value,10);
-    const isLunar = calType.value==='lunar';
-    const isLeap = document.getElementById('leapInput').checked;
+    if(!d.year || d.year<1 || d.year>3400) throw new Error('請輸入正確的出生年');
 
-    if(!year || year<1 || year>3400) throw new Error('請輸入正確的出生年');
-
-    // 設定飛星/中州派安星演算法
     if (iztro.astro.config) {
       iztro.astro.config({ algorithm: 'zhongzhou' });
     }
 
-    const dateStr = `${year}-${month}-${day}`;
+    const dateStr = `${d.year}-${d.month}-${d.day}`;
     let astrolabe;
-    if(isLunar){
-      astrolabe = iztro.astro.byLunar(dateStr, hourIndex, gender, isLeap, true, 'zh-TW');
+    if(d.calType==='lunar'){
+      astrolabe = iztro.astro.byLunar(dateStr, d.hourIndex, d.gender, d.leap, true, 'zh-TW');
     }else{
-      astrolabe = iztro.astro.bySolar(dateStr, hourIndex, gender, true, 'zh-TW');
+      astrolabe = iztro.astro.bySolar(dateStr, d.hourIndex, d.gender, true, 'zh-TW');
     }
     document.getElementById('formWrap').style.display='none';
     document.getElementById('chartWrap').style.display='block';
-    renderChart(astrolabe, gender);
+    renderChart(astrolabe, d.gender);
+    return true;
   }catch(e){
     console.error(e);
     errBox.textContent = '排盤失敗：'+e.message+'（請確認網路可載入 iztro 函式庫，並檢查日期是否存在）';
     errBox.style.display='block';
+    document.getElementById('formWrap').style.display='block';
+    document.getElementById('chartWrap').style.display='none';
+    return false;
+  }
+}
+
+document.getElementById('submitBtn').addEventListener('click', () => {
+  chartFromData(readForm());
+});
+
+/* ---------------- 常用命盤（localStorage 持久化） ---------------- */
+const PROFILE_KEY = 'ziwei_profiles';
+let editingProfileId = null;
+
+function loadProfiles(){
+  try{
+    return JSON.parse(localStorage.getItem(PROFILE_KEY)) || [];
+  }catch(e){ return []; }
+}
+function saveProfiles(list){
+  try{
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(list));
+  }catch(e){
+    alert('儲存失敗：您的瀏覽器可能停用了本機儲存（如無痕模式）。');
+  }
+}
+function profileBirthText(d){
+  const hourName = HOUR_LABELS[d.hourIndex] ? HOUR_LABELS[d.hourIndex][0] : '?';
+  return `${d.calType==='lunar'?'農曆':'國曆'}${d.year}/${d.month}/${d.day}${d.leap?'(閏)':''} ${hourName}時 ${d.gender}`;
+}
+function renderProfileList(){
+  const box = document.getElementById('profileList');
+  const list = loadProfiles();
+  if(list.length===0){
+    box.innerHTML = '<div class="profileEmpty">尚無儲存的命盤，輸入生日後按「儲存到常用命盤」即可加入。</div>';
+    return;
+  }
+  box.innerHTML = list.map(p=>`
+    <div class="profileItem">
+      <div class="pInfo">
+        <span class="pName">${escapeHtml(p.name)}</span>
+        <div class="pBirth">${profileBirthText(p)}</div>
+      </div>
+      <button class="pChart" data-act="chart" data-id="${p.id}">排盤</button>
+      <button data-act="edit" data-id="${p.id}">修改</button>
+      <button data-act="del" data-id="${p.id}">刪除</button>
+    </div>
+  `).join('');
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('profileList').addEventListener('click', e=>{
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  const list = loadProfiles();
+  const p = list.find(x=>String(x.id)===String(id));
+  if(!p) return;
+
+  if(btn.dataset.act==='chart'){
+    writeForm(p);
+    chartFromData(p);
+  }else if(btn.dataset.act==='edit'){
+    writeForm(p);
+    editingProfileId = p.id;
+    document.getElementById('saveBtn').textContent = '更 新「'+p.name+'」的 命 盤 資 料';
+  }else if(btn.dataset.act==='del'){
+    if(confirm('確定刪除「'+p.name+'」的命盤？')){
+      saveProfiles(list.filter(x=>String(x.id)!==String(id)));
+      if(String(editingProfileId)===String(id)){
+        editingProfileId = null;
+        document.getElementById('saveBtn').textContent = '儲 存 到 常 用 命 盤';
+      }
+      renderProfileList();
+    }
   }
 });
+
+document.getElementById('saveBtn').addEventListener('click', ()=>{
+  const d = readForm();
+  if(!d.name){
+    alert('請先填寫姓名，才能儲存到常用命盤。');
+    document.getElementById('nameInput').focus();
+    return;
+  }
+  if(!d.year || d.year<1 || d.year>3400){
+    alert('請輸入正確的出生年再儲存。');
+    return;
+  }
+  const list = loadProfiles();
+  if(editingProfileId!==null){
+    const idx = list.findIndex(x=>String(x.id)===String(editingProfileId));
+    if(idx>=0){ d.id = editingProfileId; list[idx] = d; }
+    editingProfileId = null;
+    document.getElementById('saveBtn').textContent = '儲 存 到 常 用 命 盤';
+  }else{
+    d.id = Date.now();
+    list.push(d);
+  }
+  saveProfiles(list);
+  renderProfileList();
+});
+
+renderProfileList();
 
 document.getElementById('backBtn').addEventListener('click', ()=>{
   document.getElementById('chartWrap').style.display='none';
