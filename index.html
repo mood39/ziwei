@@ -4,12 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>紫微斗數算命 - 飛星派</title>
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#141820">
-<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="紫微斗數">
 <script src="https://cdn.jsdelivr.net/npm/iztro/dist/iztro.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lunar-javascript/lunar.js"></script>
 <style>
   :root{
     --red:#c0392b;
@@ -180,7 +176,12 @@
   .monthGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
   .monthCard{border:1px solid #ccc;padding:8px;font-size:13px;line-height:1.6;background:#fdfaf3;}
   .monthCard.hit{background:#fff2d9;border-color:var(--red);}
-  .monthCard .mTitle{font-weight:bold;margin-bottom:4px;}
+  .monthCard .mTitle{font-weight:bold;margin-bottom:4px;font-size:14px;color:#000;}
+  .monthCard .mSub{color:#555;font-size:12.5px;margin-bottom:4px;}
+  .monthCard .leapTag{
+    display:inline-block;background:#8a6d3b;color:#fff;border-radius:2px;
+    padding:0 4px;font-size:11px;margin-left:4px;font-weight:normal;
+  }
   .monthCard .mHitTag{
     display:inline-block;color:#fff;background:var(--red);border-radius:2px;
     padding:0 4px;font-size:12px;margin-left:4px;
@@ -1346,6 +1347,39 @@ function getMonthGanzhi(yearStem, m){ // m: 1~12
   return STEM_ORDER[stemIdx] + ZHI_ORDER[branchIdx];
 }
 
+/* ---------- 農曆↔國曆轉換（使用 lunar-javascript，全域 Lunar/Solar） ---------- */
+// 農曆某年某月某日 → 國曆 Date。isLeap=true 時取閏月（lunar-javascript 以負數月份表示閏月）
+function lunarMD2solar(lunarYear, lunarMonth, lunarDay, isLeap){
+  try{
+    if(typeof Lunar === 'undefined' || !Lunar.fromYmd) return null;
+    const monthArg = isLeap ? -lunarMonth : lunarMonth;
+    const lunar = Lunar.fromYmd(lunarYear, monthArg, lunarDay);
+    const solar = lunar.getSolar();
+    return new Date(solar.getYear(), solar.getMonth()-1, solar.getDay());
+  }catch(e){ return null; }
+}
+// 取得農曆某月天數（29或30）；isLeap 指閏月。轉不出30日即為小月29天
+function lunarMonthDays(lunarYear, lunarMonth, isLeap){
+  return lunarMD2solar(lunarYear, lunarMonth, 30, isLeap) ? 30 : 29;
+}
+// 該農曆年是否有閏月、閏第幾個月（回傳月數字，無則0）
+function getLeapMonth(lunarYear){
+  try{
+    if(typeof LunarUtil !== 'undefined' && LunarUtil.getLeapMonth) return LunarUtil.getLeapMonth(lunarYear);
+    // 退回：逐月試探哪個月存在閏月（閏月初一轉得出國曆即存在）
+    for(let mm=1; mm<=12; mm++){
+      if(lunarMD2solar(lunarYear, mm, 1, true)) return mm;
+    }
+  }catch(e){}
+  return 0;
+}
+function fmtSolar(d){
+  return d ? `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}` : '';
+}
+function fmtSolarShort(d){
+  return d ? `${d.getMonth()+1}/${d.getDate()}` : '';
+}
+
 function computeYearFlow(year){
   if(!currentCellsByZhi){
     return '<p class="empty">請先在上方排出命盤，再查詢流年運勢。</p>';
@@ -1374,6 +1408,34 @@ function computeYearFlow(year){
     starHitMonths[starName] = m;
   });
 
+  // 農曆月名（正月~臘月）
+  const LUNAR_MONTH_NAME = ['正月','二月','三月','四月','五月','六月','七月','八月','九月','十月','冬月','臘月'];
+  const lunarYearNum = year;
+  const leapMonth = getLeapMonth(lunarYearNum); // 該農曆年閏第幾月，無則0
+
+  // 每個流月（1~12）對應的實際農曆月起訖國曆日；閏月併入對應的本月（同一宮位、日期展開兩段）
+  // segsOfMonth[m] = [{isLeap, startD, endD, days}...]（閏月的月會有兩段）
+  const segsOfMonth = {};
+  for(let m=1; m<=12; m++){
+    const segs = [];
+    // 本月（平月）
+    const s1 = lunarMD2solar(lunarYearNum, m, 1, false);
+    const d1 = lunarMonthDays(lunarYearNum, m, false);
+    if(s1) segs.push({isLeap:false, startD:s1, days:d1});
+    // 若本月後面跟著閏月，閏月併入本格
+    if(leapMonth===m){
+      const s2 = lunarMD2solar(lunarYearNum, m, 1, true);
+      const d2 = lunarMonthDays(lunarYearNum, m, true);
+      if(s2) segs.push({isLeap:true, startD:s2, days:d2});
+    }
+    // 補每段的 endD
+    segs.forEach(seg=>{
+      const last = lunarMD2solar(lunarYearNum, m, seg.days, seg.isLeap);
+      seg.endD = last || (seg.startD ? new Date(seg.startD.getTime()+(seg.days-1)*86400000) : null);
+    });
+    segsOfMonth[m] = segs;
+  }
+
   // 組出12個月卡片
   let monthCards = '';
   for(let m=1; m<=12; m++){
@@ -1381,28 +1443,46 @@ function computeYearFlow(year){
     const p = currentCellsByZhi[pIdx];
     const pName = p ? (NAME_ALIAS[p.name]||p.name) : '?';
     const monthGZ = getMonthGanzhi(yGZ.stem, m);
+    const segs = segsOfMonth[m] || [];
+    const hasLeap = segs.some(s=>s.isLeap);
 
-    // 流月命中：流年四化星剛好坐在本月宮位 → 月份後面加襯底色標籤
+    // 國曆起訖：從第一段起點到最後一段終點
+    let rangeText = '';
+    if(segs.length && segs[0].startD && segs[segs.length-1].endD){
+      rangeText = `${fmtSolarShort(segs[0].startD)}–${fmtSolarShort(segs[segs.length-1].endD)}`;
+    }
+
+    // 流月命中
     const hitStars = Object.keys(starHitMonths).filter(s=>starHitMonths[s]===m);
     const isHit = hitStars.length>0;
     const hitTags = hitStars.map(s=>`<span class="sihua ${sihuaEntries[s]}">${sihuaEntries[s]}</span>`).join('');
 
-    // 流日：每個月都計算，四顆化星各自在本月的哪幾天被流日走到
+    // 流日：每顆化星回到本宮的農曆日序（初X、十X、廿X），逐段轉國曆
+    // 小月30日修正為29日（該月最後一天）；閏月段各自展開一輪
     const dayParts = [];
     Object.keys(sihuaEntries).forEach(starName=>{
       const occ = (starIndex[starName]||[])[0];
       if(!occ) return;
       const offset = (((occ.branchIdx - pIdx) % 12) + 12) % 12;
-      const days = [];
+      const dayNums = [];
       for(let base=0; base<3; base++){
-        const d = offset + 1 + base*12;
-        if(d<=30) days.push(d);
+        const dn = offset + 1 + base*12;
+        if(dn<=30) dayNums.push(dn);
       }
-      dayParts.push(`<span class="sihua ${sihuaEntries[starName]}">${sihuaEntries[starName]}</span>${starName}：${days.join('、')}日`);
+      const solarDays = [];
+      segs.forEach(seg=>{
+        dayNums.forEach(dn=>{
+          const dayFixed = Math.min(dn, seg.days); // 小月無30日→取該月最後一天
+          const sd = lunarMD2solar(lunarYearNum, m, dayFixed, seg.isLeap);
+          if(sd) solarDays.push((seg.isLeap?'閏':'')+fmtSolarShort(sd));
+        });
+      });
+      if(solarDays.length)
+        dayParts.push(`<span class="sihua ${sihuaEntries[starName]}">${sihuaEntries[starName]}</span>${starName}：${solarDays.join('、')}`);
     });
     const dayHtml = dayParts.length ? `<div class="mDays">${dayParts.join('<br>')}</div>` : '';
 
-    // 本月宮位內入廟/旺/陷的星曜分布（亮度採用與命盤一致的簡化規則：得利→旺、不→陷）
+    // 本月宮位內入廟/旺/陷的星曜分布
     let brightHtml = '';
     if(p){
       const palaceStars = [...(p.majorStars||[]), ...(p.minorStars||[])];
@@ -1418,9 +1498,10 @@ function computeYearFlow(year){
       if(brightParts.length) brightHtml = `<div class="mBright">${brightParts.join('　')}</div>`;
     }
 
+    const leapTag = hasLeap ? `<span class="leapTag">含閏${LUNAR_MONTH_NAME[m-1]}</span>` : '';
     monthCards += `<div class="monthCard${isHit?' hit':''}">
-      <div class="mTitle">${m}月${hitTags}　${monthGZ}${isHit?`<span class="mHitTag">流月四化命中</span>`:''}</div>
-      <div>宮位：${p?p.heavenlyStem+p.earthlyBranch:''}【${pName}】</div>
+      <div class="mTitle">${LUNAR_MONTH_NAME[m-1]}（${monthGZ}）${leapTag}${hitTags}${isHit?`<span class="mHitTag">流月四化命中</span>`:''}</div>
+      <div class="mSub">${rangeText||('第'+m+'月')}　宮位：${p?p.heavenlyStem+p.earthlyBranch:''}【${pName}】</div>
       ${brightHtml}
       ${dayHtml}
     </div>`;
@@ -1503,6 +1584,11 @@ function computeYearFlow(year){
       <div>流年四化：<b>${sihuaText}</b></div>
       <div>皇極經世值年卦：<b>${hexagram.full}卦</b></div>
       <div>流年命宮：<b>${flowSoulPalace?flowSoulPalace.heavenlyStem+flowSoulPalace.earthlyBranch:''}【${flowSoulName}】</b></div>
+      <div>本流年（${yGZ.stem}${yGZ.zhi}年）期間：<b>${
+        (segsOfMonth[1] && segsOfMonth[1][0] && segsOfMonth[12] && segsOfMonth[12].length)
+          ? fmtSolar(segsOfMonth[1][0].startD)+'　~　'+fmtSolar(segsOfMonth[12][segsOfMonth[12].length-1].endD)
+          : '（農曆轉換載入中）'
+      }</b>（農曆正月初一至隔年除夕，共十二個農曆月${leapMonth?('，含閏'+LUNAR_MONTH_NAME[leapMonth-1]):''}）</div>
       <div style="color:#1c5fa8;">六大面向能量圖已疊加本年流年（藍色虛線），請見上方雷達圖。</div>
     </div>
     <div class="yfTextBox">
@@ -1516,8 +1602,8 @@ function computeYearFlow(year){
     </div>
     <div class="monthGrid">${monthCards}</div>
     <p style="color:#999;font-size:12px;margin-top:12px;">
-      說明：流月採「流年命宮起正月，順行十二宮」排列；流日以每月宮位為初一順行十二宮推算，
-      列出四顆流年化星各自被流日走到的日期。月份天數以30天概算（實際農曆月或為29天，僅供參考）。
+      說明：流月採「流年命宮起正月，順行十二宮」排列，卡片標題為該農曆月對應的國曆日期區間；
+      流日以每月宮位為初一順行十二宮推算，日期已換算為國曆。農曆與國曆轉換採 lunar-javascript。
     </p>
   `;
 }
